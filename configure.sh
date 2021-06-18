@@ -1,62 +1,117 @@
 #!/bin/bash
 
-# format - hidden:layers:repository
+# format - hidden:layers-as-directories:repository
 # explanation:
-# the first layers will be hidden directories as its content can be used to configure applications, deployment subjects and more of that type
-# upcoming layers (1 and up) are there to group what is next such as the configuration files
-# the final tag (always need to be set as last one) are repositories used as sources. With that, content could be set to the layered directory path 
+# the first layers must be hidden directories as its content can be used to configure applications, deployment subjects and more of that type. So we don't want to let everyone be able to access this straight away
+# upcoming layers (2 and up) are there to group what is next such as the configuration files
+# the final tag (always need to be set as the last one) are repositories used as sources. With that, content could be set to the layered directory path 
 
-prep() {
+prepareVars() {
 
   # define working directory
   root_dir="./custom-directories"
 
   DEPLOYMENT_DIRECTORY_ASSIGNMENT=(
-    ".hidden_layer1:directory1:repository_1"
-    ".hidden_layer1:directory2:repository_2"
-    ".hidden_layer2:directory1:subdirectory1:repository_3"
-    ".hidden_layer3:directory1:subdirectory1:innerdirectory1:repository_4"
+    ".hidden1:directory1:repository_1"
+    ".hidden2:directory2:repository_2"
+    ".hidden3:directory1:subdirectory1:repository_3"
+    ".hidden4:directory1:subdirectory1:innerdirectory1:repository_4"
   )
 
 }
 
-_main() {
-
-  # include function
-  prep
+configureRootDir() {
 
   # defined root_dir need to exist before continuing
   if [ ! -d "$root_dir" ]; then 
-  echo "mkdir $root_dir"; mkdir $root_dir; 
-  else echo "$root_dir already has been set"; fi
+  
+    echo "Checking root directory '$root_dir' for existence"
+    echo "mkdir $root_dir"
+    mkdir $root_dir
+
+  else 
+    echo "$root_dir already has been set, nothing to do here" 
+  fi
+
+}
+
+configureLayeredDirectories() {
 
   for collection in ${DEPLOYMENT_DIRECTORY_ASSIGNMENT[@]}; do
 
-      # split collection into array
-      IFS=':' read -r -a layers <<< "$collection"
+    # split collection into array
+    IFS=':' read -r -a layers <<< "$collection"
 
-      all_values="${collection}"
-      all_values_slashed=$(echo ${collection} | tr : /)
+    all_values=$(echo ${collection} | tr : /)
 
-      # extract all layers
-      path_format=$(echo ${collection%:*} | tr : /)
+    # extract all layers
+    all_layers=$(echo ${collection%:*} | tr : /)
 
-      # extract the repository from the last array element
-      source_repositories="${layers[-1]}"
+    # extract the repository from the last array element
+    source_repositories="${layers[-1]}"
 
-      # configure all layers as directories
-      if [ ! -d "$root_dir/$path_format" ]; then 
-      echo && echo "mkdir -p $root_dir/$path_format"; mkdir -p $root_dir/$path_format; 
-      else echo && echo "$root_dir/$path_format exists"; fi
+    u_values=($(echo "${layers[0]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+    first_layers+=($u_values)
 
-      # the following lines are for sourcing/comparison purposes
-      echo && echo "All values: " $all_values
-      echo "All values by '/': " $all_values_slashed
-      echo "All layers in path format: " $path_format
-      echo "Repository source: " $source_repositories
+    # configure all layers as directories
+    if [ ! -d "$root_dir/$all_layers" ]; then 
+
+      echo && echo "Directory '$root_dir/$all_layers' does not exist yet"
+      echo "mkdir -p $root_dir/$all_layers" 
+      mkdir -p $root_dir/$all_layers
+
+    else 
+      echo && echo "Directory $root_dir/$all_layers exists, nothing to do here" 
+    fi
+
+    # the following lines are for sourcing/comparison purposes
+    # All values in path format: $all_values
+    # All layers in path format: $all_layers
+    # Repository source: $source_repositories
 
   done
 
 }
 
-_main
+cleanup() {
+
+  live_values=($(find "$root_dir" -maxdepth 1 -name ".*" | sort))
+  for value in ${live_values[@]}; do
+
+    crop="${value##$root_dir/}"
+    directories+=($crop)
+
+  done
+
+  for live_value in ${directories[@]}; do
+
+    if [[ ! "${first_layers[@]}" =~ "$live_value" ]]; then
+
+      echo && echo "$live_value is not equal to the first layers that were assigned"
+      path="$root_dir/$live_value"
+      echo "rm -rf $path"
+      rm -rf $path
+
+    fi
+
+  done
+
+}
+
+main() {
+
+  # include function
+  prepareVars
+
+  # set root directory
+  configureRootDir
+
+  # set assigned values as layered directories
+  configureLayeredDirectories
+
+  # remove everything that is not equal to assigned values
+  cleanup
+
+}
+
+main
