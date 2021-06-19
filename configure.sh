@@ -12,10 +12,10 @@ prepareVars() {
   root_dir="./custom-directories"
 
   DEPLOYMENT_DIRECTORY_ASSIGNMENT=(
-    ".hidden1:directory1:repository_1"
-    ".hidden2:directory2:repository_2"
-    ".hidden3:directory1:subdirectory1:repository_3"
-    ".hidden4:directory1:subdirectory1:innerdirectory1:repository_4"
+    ".level1-dir1:level2-dir1:level3-dir1:repository"
+    ".level1-dir1:level2-dir2:repository"
+    ".level1-dir2:level2-dir1:level3-dir1:level4-dir1:repository"
+    ".level1-dir3:level2-dir1:level3-dir1:repository"
   )
 
 }
@@ -64,6 +64,8 @@ configureLayeredDirectories() {
       echo && echo "Directory $root_dir/$all_layers exists, nothing to do here" 
     fi
 
+    layer_collection+=($all_layers)
+
     # the following lines are for sourcing/comparison purposes
     # All values in path format: $all_values
     # All layers in path format: $all_layers
@@ -75,24 +77,36 @@ configureLayeredDirectories() {
 
 cleanup() {
 
-  live_values=($(find "$root_dir" -maxdepth 1 -name ".*" | sort))
-  for value in ${live_values[@]}; do
+  server_content=($(find "$root_dir" -maxdepth 1 -name ".*" -type d | sort))
+  for first_layer in ${server_content[@]}; do
 
-    crop="${value##$root_dir/}"
-    directories+=($crop)
+    # get the first layer of the live server to set a base where to start from
+    crop="${first_layer##$root_dir/}"
+    first_layers+=($crop)
 
   done
 
-  for live_value in ${directories[@]}; do
+  for first in ${first_layers[@]}; do
 
-    if [[ ! "${first_layers[@]}" =~ "$live_value" ]]; then
+    # we need a live path equal formatted to assigned valus, so we're only looking for directories to built up from $first_layer
+    base_path="$root_dir/$first"
+    path_collection+=($(find "$base_path" -type d | sort))
 
-      echo && echo "$live_value is not equal to the first layers that were assigned"
-      path="$root_dir/$live_value"
-      echo "rm -rf $path"
-      rm -rf $path
+  done
 
-    fi
+  for live_path in ${path_collection[@]}; do
+
+    # since the $root_dir is excluded from assigned values, it can be removed here also
+    crop="${live_path##$root_dir/}"
+
+    # looking for matches that are NOT existend within the assigned collection of layers
+    if [[ ! "${layer_collection[@]}" =~ "$crop" ]]; then
+
+      echo && echo "$crop is going to be removed since it was not assigned as layer"
+      echo "rm -rf $root_dir/$crop"
+      rm -rf $root_dir/$crop
+
+    fi     
 
   done
 
