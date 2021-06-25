@@ -18,6 +18,8 @@ prepareVars() {
     ".level1-dir3:level2-dir1:level3-dir1:repository"
   )
 
+  _prepareArrayData
+
 }
 
 configureRootDir() {
@@ -35,36 +37,33 @@ configureRootDir() {
 
 }
 
-configureLayeredDirectories() {
+_prepareArrayData() {
 
-  for collection in ${DEPLOYMENT_DIRECTORY_ASSIGNMENT[@]}; do
+  for collection in "${DEPLOYMENT_DIRECTORY_ASSIGNMENT[@]}"; do
 
     # split collection into array
     IFS=':' read -r -a layers <<< "$collection"
 
-    all_values=$(echo ${collection} | tr : /)
-
-    # extract all layers
-    all_layers=$(echo ${collection%:*} | tr : /)
+    # extract all values in path format for easy comparing   
+    all_values+="($(echo "${collection}" | tr : /))"
 
     # extract the repository from the last array element
-    source_repositories="${layers[-1]}"
+    source_repositories+=("${layers[-1]}")
+    
+    # extract all layers
+    all_layers="$(echo "${collection%:*}" | tr : /)"
+    layer_collection+=("$all_layers")
 
-    u_values=($(echo "${layers[0]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-    first_layers+=($u_values)
+    mapfile -t u_values < <(echo "${layers[0]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    if [[ -n "${u_values[*]}" ]]; then
 
-    # configure all layers as directories
-    if [ ! -d "$root_dir/$all_layers" ]; then 
+      for value in "${u_values[@]}"; do
+        first_layers+=("$value")
+      done
 
-      echo && echo "Directory '$root_dir/$all_layers' does not exist yet"
-      echo "mkdir -p $root_dir/$all_layers" 
-      mkdir -p $root_dir/$all_layers
-
-    else 
-      echo && echo "Directory $root_dir/$all_layers exists, nothing to do here" 
+    else
+      echo "Variable 'u_values' seems empty, exiting.. " && exit 1
     fi
-
-    layer_collection+=($all_layers)
 
     # the following lines are for sourcing/comparison purposes
     # All values in path format: $all_values
@@ -75,40 +74,99 @@ configureLayeredDirectories() {
 
 }
 
+configureDirectoriesByLayer() {
+
+  if [[ -n "${layer_collection[*]}" ]]; then
+
+    for layers in "${layer_collection[@]}"; do
+
+      # configure all layers as directories
+      if [ ! -d "$root_dir/$layers" ]; then 
+
+        echo && echo "Directory '$root_dir/$layers' does not exist yet"
+        echo "mkdir -p $root_dir/$layers" 
+        mkdir -p "$root_dir/$layers"
+
+      else 
+        echo && echo "Directory '$root_dir/$layers' already exists, nothing to do here" 
+      fi
+
+    done
+
+  else
+    echo "Variable 'all_layers' seems empty, empty, exiting.." && exit 1
+  fi
+
+}
+
+_collectFirstLayersAsDirectories() {
+
+  mapfile -t server_content < <(find "$root_dir" -maxdepth 1 -name ".*" -type d | sort)
+  if [[ -n "${server_content[*]}" ]]; then
+
+    for first_layer in "${server_content[@]}"; do
+
+      # get the first layer of the live server to set a base where to start from
+      crop="${first_layer##$root_dir/}"
+      first_live_layers+=("$crop")
+
+    done
+
+  else
+    echo "Command 'find $root_dir -maxdepth 1 -name .* -type d | sort' returned empty, exiting.." && exit 1
+  fi
+
+}
+
+_collectFirstLayerPaths() {
+
+  _collectFirstLayersAsDirectories # pass
+
+  if [[ -n "${first_live_layers[*]}" ]]; then
+
+    for first_dir in "${first_live_layers[@]}"; do
+
+      # we need a live path equal formatted to assigned values, so we're only looking for directories to built up from $first_layer
+      base_path="$root_dir/$first_dir"
+      mapfile -t path_collection < <(find "$base_path" -type d | sort)
+
+    done
+
+  else
+    echo "Variable 'first_layers' seems empty, exiting.." && exit 1
+  fi
+
+}
+
 cleanup() {
 
-  server_content=($(find "$root_dir" -maxdepth 1 -name ".*" -type d | sort))
-  for first_layer in ${server_content[@]}; do
+  _collectFirstLayerPaths
 
-    # get the first layer of the live server to set a base where to start from
-    crop="${first_layer##$root_dir/}"
-    first_layers+=($crop)
+  if [[ -n "${path_collection[*]}" ]]; then
 
-  done
+    for live_path in "${path_collection[@]}"; do
 
-  for first in ${first_layers[@]}; do
+      # since the $root_dir is excluded from assigned values, it also can be removed here
+      result="${live_path##$root_dir/}"
 
-    # we need a live path equal formatted to assigned valus, so we're only looking for directories to built up from $first_layer
-    base_path="$root_dir/$first"
-    path_collection+=($(find "$base_path" -type d | sort))
+      # looking for matches that are NOT existend within the assigned collection of layers
+      if [[ ! "${layer_collection[*]}" =~ $result ]]; then
 
-  done
+        echo "Directory '$result' does not belong here"
 
-  for live_path in ${path_collection[@]}; do
+        echo && echo "$result is going to be removed since it was not assigned as layer"
+        final="$root_dir/$result"
 
-    # since the $root_dir is excluded from assigned values, it can be removed here also
-    crop="${live_path##$root_dir/}"
+        echo "rm -rf $final"
+        rm -rf "$final"
 
-    # looking for matches that are NOT existend within the assigned collection of layers
-    if [[ ! "${layer_collection[@]}" =~ "$crop" ]]; then
+      fi     
 
-      echo && echo "$crop is going to be removed since it was not assigned as layer"
-      echo "rm -rf $root_dir/$crop"
-      rm -rf $root_dir/$crop
+    done
 
-    fi     
-
-  done
+  else
+    echo "Variable 'path_collection' seems empty, exiting.." && exit 1
+  fi
 
 }
 
@@ -121,10 +179,12 @@ main() {
   configureRootDir
 
   # set assigned values as layered directories
-  configureLayeredDirectories
+  configureDirectoriesByLayer
 
   # remove everything that is not equal to assigned values
   cleanup
+
+  # figure out why for example ./custom-directories/.level1-dir1/level2-dir1/level3-dir1 could'nt be removed instead of a path with a new value ./custom-directories/.level1-dir4/level2-dir1/level3-dir1
 
 }
 
